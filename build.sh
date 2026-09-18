@@ -28,6 +28,8 @@ xcrun swiftc \
   "$ROOT/PTYSession.swift" \
   "$ROOT/TerminalView.swift" \
   "$ROOT/Activity.swift" \
+  "$ROOT/ComputerBackend.swift" \
+  "$ROOT/CodexChat.swift" \
   "$ROOT/RedTrace.swift" \
   -o "$MACOS_DIR/RedTrace"
 

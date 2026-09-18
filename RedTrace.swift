@@ -995,6 +995,9 @@ struct RedTraceView: View {
     @StateObject private var tailer: LogTailer
     @StateObject private var commandSession: CommandSession
     @StateObject private var activityStore: ActivityStore
+    private let opencodeBackend: ExternalMCPComputerBackend
+    private let openComputerBackend: OpenComputerUseBackend
+    @AppStorage("computerBackendChoice") private var computerBackendChoice = "opencode"
     @StateObject private var btopMonitor: BtopMonitor
     @StateObject private var systemMonitor = SystemMonitor()
     @AppStorage("windowOpacity") private var opacity = 0.85
@@ -1034,7 +1037,10 @@ struct RedTraceView: View {
         self.isDedicated = isDedicated
         _tailer = StateObject(wrappedValue: LogTailer(startImmediately: mode == .watcher))
         _commandSession = StateObject(wrappedValue: CommandSession(startImmediately: mode == .runner))
-        _activityStore = StateObject(wrappedValue: ActivityStore())
+        let activityStore = ActivityStore()
+        _activityStore = StateObject(wrappedValue: activityStore)
+        opencodeBackend = ExternalMCPComputerBackend(activityStore: activityStore)
+        openComputerBackend = OpenComputerUseBackend(activityStore: activityStore)
         _btopMonitor = StateObject(wrappedValue: BtopMonitor(startImmediately: mode == .btop))
         _selectedMode = State(initialValue: mode)
     }
@@ -1079,6 +1085,7 @@ struct RedTraceView: View {
         .onAppear {
             applyRedThemeDefaultsIfNeeded()
             if usesCardLayout { activateAllModes() }
+            if computerBackendChoice != "off" { Task { try? await selectedComputerBackend.connect() } }
         }
         .onChange(of: mainLayoutMode) { newLayout in
             if newLayout == "cards" { activateAllModes() }
@@ -1087,14 +1094,18 @@ struct RedTraceView: View {
             switch newMode {
             case .watcher: tailer.activate()
             case .runner: commandSession.activate()
-            case .codex: break
+            case .codex: if computerBackendChoice != "off" { Task { try? await selectedComputerBackend.connect() } }
             case .btop: btopMonitor.activate()
             }
+        }
+        .onChange(of: computerBackendChoice) { _ in
+            opencodeBackend.stopControl()
+            openComputerBackend.stopControl()
         }
     }
 
     private var toolbar: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .center, spacing: 8) {
             if isDedicated {
                 Label(dedicatedModeLabel, systemImage: dedicatedModeIcon)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -1113,7 +1124,7 @@ struct RedTraceView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 196)
+                .frame(width: 224, height: 22)
             } else {
                 Menu {
                     ForEach(WindowMode.allCases) { mode in
@@ -1142,6 +1153,7 @@ struct RedTraceView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .frame(width: 24, height: 22, alignment: .center)
                 .help("Choose which cards are visible")
             }
             if selectedMode == .watcher && !usesCardLayout {
@@ -1244,6 +1256,10 @@ struct RedTraceView: View {
         !isDedicated && mainLayoutMode == "cards"
     }
 
+    private var selectedComputerBackend: ComputerBackend {
+        computerBackendChoice == "open" ? openComputerBackend : opencodeBackend
+    }
+
     private func activateAllModes() {
         tailer.activate()
         commandSession.activate()
@@ -1279,7 +1295,7 @@ struct RedTraceView: View {
     private var logView: some View {
         VStack(spacing: 0) {
             if selectedMode == .runner { InteractiveTerminalView(model: commandSession.terminal, send: commandSession.send) }
-            else if selectedMode == .codex { ActivityView(store: activityStore) }
+            else if selectedMode == .codex { ActivityView(store: activityStore, backend: selectedComputerBackend, backendChoice: $computerBackendChoice) }
             else { TerminalTextView(text: visibleText, fontName: fontName, fontSize: fontSize, textColor: NSColor(hex: textColorHex), wrapLines: wrapLines) }
             if selectedMode == .runner {
                 Divider().opacity(0.45)
@@ -1451,7 +1467,7 @@ struct RedTraceView: View {
                 Divider().opacity(0.35)
                 commandBar
             }
-        case .codex: ActivityView(store: activityStore)
+        case .codex: ActivityView(store: activityStore, backend: selectedComputerBackend, backendChoice: $computerBackendChoice)
         case .btop:
             btopView
         }
