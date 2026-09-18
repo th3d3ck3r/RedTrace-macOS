@@ -11,6 +11,7 @@ enum WindowMode: String, CaseIterable, Identifiable, Hashable {
     case runner
     case codex
     case btop
+    case chat
 
     var id: String { rawValue }
 }
@@ -1096,6 +1097,7 @@ struct RedTraceView: View {
             case .runner: commandSession.activate()
             case .codex: if computerBackendChoice != "off" { Task { try? await selectedComputerBackend.connect() } }
             case .btop: btopMonitor.activate()
+            case .chat: break
             }
         }
         .onChange(of: computerBackendChoice) { _ in
@@ -1121,6 +1123,7 @@ struct RedTraceView: View {
                     Text("RUN").tag(WindowMode.runner)
                     Text("CHATGPT").tag(WindowMode.codex)
                     Text("BTOP").tag(WindowMode.btop)
+                    Text("CHAT").tag(WindowMode.chat)
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
@@ -1272,6 +1275,7 @@ struct RedTraceView: View {
         case .runner: return "RUN"
         case .codex: return "CHATGPT"
         case .btop: return "BTOP"
+        case .chat: return "CHAT"
         }
     }
 
@@ -1281,6 +1285,7 @@ struct RedTraceView: View {
         case .runner: return "terminal"
         case .codex: return "chevron.left.forwardslash.chevron.right"
         case .btop: return "waveform.path.ecg"
+        case .chat: return "bubble.left.and.bubble.right"
         }
     }
 
@@ -1310,6 +1315,7 @@ struct RedTraceView: View {
         case .runner: return commandSession.output
         case .codex: return ""
         case .btop: return ""
+        case .chat: return ""
         }
     }
 
@@ -1369,6 +1375,7 @@ struct RedTraceView: View {
             case .runner: commandSession.activate()
             case .codex: break
             case .btop: btopMonitor.activate()
+            case .chat: break
             }
         }
     }
@@ -1470,6 +1477,8 @@ struct RedTraceView: View {
         case .codex: ActivityView(store: activityStore, backend: selectedComputerBackend, backendChoice: $computerBackendChoice)
         case .btop:
             btopView
+        case .chat:
+            CodexChatView(store: activityStore)
         }
     }
 
@@ -1479,6 +1488,7 @@ struct RedTraceView: View {
         case .runner: return "RUN"
         case .codex: return "CHATGPT"
         case .btop: return "BTOP"
+        case .chat: return "CHAT"
         }
     }
 
@@ -1488,6 +1498,7 @@ struct RedTraceView: View {
         case .runner: return "terminal"
         case .codex: return "chevron.left.forwardslash.chevron.right"
         case .btop: return "waveform.path.ecg"
+        case .chat: return "bubble.left.and.bubble.right"
         }
     }
 
@@ -1497,6 +1508,7 @@ struct RedTraceView: View {
         case .runner: return .orange
         case .codex: return .pink
         case .btop: return .cyan
+        case .chat: return .pink
         }
     }
 

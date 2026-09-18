@@ -36,22 +36,20 @@ struct ActivityView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $mode) {
-                Text("Minimal").tag("Minimal")
-                Text("Normal").tag("Normal")
-                Text("Verbose").tag("Verbose")
+            HStack(spacing: 5) {
+                ForEach(["Minimal", "Normal", "Verbose"], id: \.self) { value in
+                    Button(value) { mode = value }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(mode == value ? .white : .secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(mode == value ? Color.red.opacity(0.72) : Color.white.opacity(0.08), in: Capsule())
+                }
+                Spacer()
             }
-            .pickerStyle(.segmented)
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
 
-            Picker("", selection: $showChat) { Text("Activity").tag(false); Text("Chat").tag(true) }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
-
-            if showChat {
-                CodexChatView(store: store)
-            } else {
                 computerControlPanel
 
                 ScrollViewReader { proxy in
@@ -134,7 +132,6 @@ struct ActivityView: View {
                         }
                     }
                 }
-            }
             }
         }
     }
