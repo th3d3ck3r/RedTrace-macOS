@@ -2,6 +2,21 @@
 
 RedTrace is a small always-on-top window that mirrors your interactive zsh sessions. It shows commands, standard output, and errors from every **new** Terminal, iTerm2, Warp, or VS Code terminal session after installation.
 
+## 2.7 — Interactive terminal and ChatGPT activity
+
+RedTrace 2.7 upgrades Runner to a RedTrace-owned PTY. Each Runner starts interactive zsh with `TERM=xterm-256color`, accepts direct keyboard input and paste, supports terminal resizing, and no longer disables terminal colors. The terminal model handles common cursor, erase, style, alternate-screen, cursor-visibility, bracketed-paste, and terminal-query sequences while batching redraws for smooth output.
+
+The former CODEX interface is now **CHATGPT**. Minimal, Normal, and Verbose displays share one local activity stream. It represents observable tool activity only—commands, reads, searches, edits, writes, targets, timing, results, and local/remote metadata—and never exposes or claims hidden reasoning.
+
+### 2.7.0 changelog
+
+- Added native `forkpty` Runner transport and clean shell reaping.
+- Added interactive terminal input, paste, resize, styles, alternate-screen handling, and terminal protocol responses.
+- Added normalized, bounded ChatGPT activity history with Minimal, Normal, and Verbose views.
+- Renamed user-facing CODEX labels to CHATGPT.
+- Updated hooks to record non-command tool events plus target, input, exit-code, and error metadata.
+- Added macOS GitHub Actions compilation and hook-syntax validation.
+
 ## Install
 
 1. Unzip the download.
