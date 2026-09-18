@@ -1,0 +1,27 @@
+name: Build RedTrace macOS
+
+on:
+  push:
+    paths:
+      - '**.swift'
+      - '**.py'
+      - '**.zsh'
+      - 'build.sh'
+      - '.github/workflows/macos-build.yml'
+  pull_request:
+    paths:
+      - '**.swift'
+      - '**.py'
+      - '**.zsh'
+      - 'build.sh'
+      - '.github/workflows/macos-build.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app
+        run: ./build.sh
+      - name: Validate hook
+        run: python3 -m py_compile codex-hook.py
