@@ -19,7 +19,10 @@ final class CodexChatSession: ObservableObject {
         input = ""; messages.append((UUID(), text, true)); isRunning = true; status = "Connecting"
         ensureServer {
             if let threadID = self.threadID { self.startTurn(threadID, text: text) }
-            else { self.send(method: "thread/start", params: [:]) { result in self.threadID = result["threadId"] as? String; if let id = self.threadID { self.startTurn(id, text: text) } } }
+            else { self.send(method: "thread/start", params: [:]) { result in
+                self.threadID = result["threadId"] as? String ?? (result["thread"] as? [String: Any])?["id"] as? String
+                if let id = self.threadID { self.startTurn(id, text: text) } else { self.status = "Thread start failed"; self.isRunning = false }
+            } }
         }
     }
     private func ensureServer(_ ready: @escaping () -> Void) {
@@ -31,7 +34,7 @@ final class CodexChatSession: ObservableObject {
         send(method: "initialize", params: ["clientInfo": ["name": "RedTrace", "version": "1.0"]]) { _ in self.status = "Connected"; ready() }
     }
     private func startTurn(_ threadID: String, text: String) { send(method: "turn/start", params: ["threadId": threadID, "input": [["type": "text", "text": text]]]) }
-    private func send(method: String, params: [String: Any], completion: (([String: Any]) -> Void)? = nil) { let id = nextID; nextID += 1; pending[id] = completion; guard let stdin, let data = try? JSONSerialization.data(withJSONObject: ["id": id, "method": method, "params": params]) else { return }; stdin.write(data); stdin.write(Data([10])) }
+    private func send(method: String, params: [String: Any], completion: (([String: Any]) -> Void)? = nil) { let id = nextID; nextID += 1; pending[id] = completion; guard let stdin, let data = try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "method": method, "params": params]) else { return }; stdin.write(data); stdin.write(Data([10])) }
     private var pending: [Int: (([String: Any]) -> Void)?] = [:]
     private func receive(_ data: Data) { guard !data.isEmpty else { return }; buffer.append(data); while let newline = buffer.firstIndex(of: 10) { let line = buffer.prefix(upTo: newline); buffer.removeSubrange(...newline); guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }; if let id = object["id"] as? Int, let completion = pending.removeValue(forKey: id) ?? nil { completion(object["result"] as? [String: Any] ?? [:]) }; guard let method = object["method"] as? String else { continue }; let params = object["params"] as? [String: Any] ?? [:]; if method.contains("delta") { let delta = params["delta"] as? String ?? params["text"] as? String ?? ""; if !delta.isEmpty { DispatchQueue.main.async { if let last = self.messages.last, !last.isUser { self.messages[self.messages.count - 1].text += delta } else { self.messages.append((UUID(), delta, false)) } } } }; if method.contains("completed") || method.contains("failed") { DispatchQueue.main.async { self.isRunning = false } } } }
     private static func findCodex() -> URL? { let fm = FileManager.default; let paths = ["/usr/local/bin/codex", "/opt/homebrew/bin/codex", fm.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/codex").path]; return paths.first { fm.isExecutableFile(atPath: $0) }.map(URL.init(fileURLWithPath:)) }
