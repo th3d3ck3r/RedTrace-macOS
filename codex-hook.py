@@ -17,12 +17,13 @@ def execution_origin(event: dict) -> str:
     return "remote" if cwd.startswith(remote_roots) else "local"
 
 
+MAX_FIELD = 65536
 def printable_output(value) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, indent=2)
+        return value[:MAX_FIELD]
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))[:MAX_FIELD]
 
 
 def first_value(mapping: dict, *keys):
@@ -51,8 +52,6 @@ def main() -> int:
     event_name = str(event.get("hook_event_name") or event.get("hookEventName") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = command_from_input(tool_input)
-    if not command:
-        return 0
     tool_name = str(event.get("tool_name") or event.get("toolName") or "")
     record = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -65,6 +64,10 @@ def main() -> int:
         "tool_name": tool_name,
         "command": command,
         "output": printable_output(first_value(event, "tool_response", "tool_output", "tool_result")),
+        "target": first_value(tool_input, "path", "file", "file_path", "filename", "target", "query", "pattern", "search_query") or "",
+        "tool_input": printable_output(tool_input),
+        "exit_code": first_value(event, "exit_code", "exitCode"),
+        "error": printable_output(event.get("error")),
     }
 
     folder = os.path.expanduser("~/.redtrace")

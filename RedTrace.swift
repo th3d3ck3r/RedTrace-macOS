@@ -263,7 +263,7 @@ struct RedTraceApp: App {
         }
         .windowStyle(.hiddenTitleBar)
 
-        WindowGroup("RedTrace Codex", id: "codex") {
+        WindowGroup("RedTrace ChatGPT", id: "codex") {
             RedTraceView(mode: .codex, isDedicated: true)
                 .frame(minWidth: 420, minHeight: 220)
         }
@@ -476,16 +476,13 @@ final class LogTailer: ObservableObject {
 final class CommandSession: ObservableObject {
     @Published var input = ""
     @Published var isActive = false
-    @Published var output = "Runner ready. Type a command below and press Return.\n"
-
-    private var process: Process?
-    private var inputPipe: Pipe?
-    private var outputPipe: Pipe?
+    @Published var output = "Runner ready. Click the terminal or type a quick command below.\n"
+    let terminal = TerminalModel()
+    private let pty = PTYSession()
     private var history: [String] = []
     private var historyIndex: Int?
     private var renderTimer: Timer?
     private var pendingOutput = ""
-    private let screen = TerminalScreen()
     private let trimAtCharacters = 400_000
     private let retainedCharacters = 250_000
 
@@ -499,13 +496,12 @@ final class CommandSession: ObservableObject {
 
     func activate() {
         if renderTimer == nil {
-            screen.feed(output)
             renderTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
                 self?.flushPendingOutput()
             }
             renderTimer?.tolerance = 0.002
         }
-        if process?.isRunning != true { start() }
+        if !isActive { start() }
     }
 
     func runInput() {
@@ -516,13 +512,7 @@ final class CommandSession: ObservableObject {
         historyIndex = nil
         input = ""
 
-        guard let data = (command + "\n").data(using: .utf8),
-              let inputPipe else { return }
-        do {
-            try inputPipe.fileHandleForWriting.write(contentsOf: data)
-        } catch {
-            appendOutput("\nRedTrace could not send the command: \(error.localizedDescription)\n")
-        }
+        send(Data((command + "\n").utf8))
     }
 
     func previousCommand() {
@@ -552,43 +542,16 @@ final class CommandSession: ObservableObject {
 
     func clearOutput() {
         pendingOutput = ""
-        screen.clear()
+        terminal.clear()
         output = ""
     }
 
     private func start() {
-        let task = Process()
-        let stdin = Pipe()
-        let output = Pipe()
-
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        task.arguments = ["-q", "/dev/null", "/bin/zsh", "-il"]
-        task.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
-        task.standardInput = stdin
-        task.standardOutput = output
-        task.standardError = output
-        task.environment = ProcessInfo.processInfo.environment.merging([
-            "COMMANDGLASS_ATTACHED": "1",
-            "REDTRACE_ATTACHED": "1",
-            "TERM": "xterm-256color",
-            "NO_COLOR": "1",
-            "CLICOLOR": "0"
-        ]) { _, new in new }
-
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            self?.appendOutput(data)
-        }
-        task.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async { self?.isActive = false }
-        }
-
         do {
-            try task.run()
-            process = task
-            inputPipe = stdin
-            outputPipe = output
+            pty.onData = { [weak self] data in self?.appendOutput(data) }
+            pty.onExit = { [weak self] in self?.isActive = false }
+            terminal.onResponse = { [weak self] data in self?.send(data) }
+            try pty.start(columns: 100, rows: 30)
             isActive = true
         } catch {
             appendOutput("\nRedTrace could not start zsh: \(error.localizedDescription)\n")
@@ -596,12 +559,7 @@ final class CommandSession: ObservableObject {
     }
 
     private func stop() {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        if process?.isRunning == true { process?.terminate() }
-        try? inputPipe?.fileHandleForWriting.close()
-        process = nil
-        inputPipe = nil
-        outputPipe = nil
+        pty.stop()
         isActive = false
     }
 
@@ -614,17 +572,19 @@ final class CommandSession: ObservableObject {
 
     private func flushPendingOutput() {
         guard !pendingOutput.isEmpty else { return }
-        screen.feed(pendingOutput)
+        terminal.feed(Data(pendingOutput.utf8))
         pendingOutput = ""
-        output = screen.text
+        output = terminal.lines().map { String($0.map(\.character)) }.joined(separator: "\n")
         if output.count > trimAtCharacters {
             output = String(output.suffix(retainedCharacters))
         }
     }
 
     private func appendOutput(_ data: Data) {
-        appendOutput(String(decoding: data, as: UTF8.self))
+        DispatchQueue.main.async { [weak self] in self?.pendingOutput += String(decoding: data, as: UTF8.self) }
     }
+    func send(_ data: Data) { pty.write(data) }
+    func resize(columns: Int, rows: Int) { terminal.resize(columns: columns, rows: rows); pty.resize(columns: columns, rows: rows) }
 }
 
 final class CodexEventTailer: ObservableObject {
@@ -1034,7 +994,7 @@ struct RedTraceView: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var tailer: LogTailer
     @StateObject private var commandSession: CommandSession
-    @StateObject private var codexTailer: CodexEventTailer
+    @StateObject private var activityStore: ActivityStore
     @StateObject private var btopMonitor: BtopMonitor
     @StateObject private var systemMonitor = SystemMonitor()
     @AppStorage("windowOpacity") private var opacity = 0.85
@@ -1074,7 +1034,7 @@ struct RedTraceView: View {
         self.isDedicated = isDedicated
         _tailer = StateObject(wrappedValue: LogTailer(startImmediately: mode == .watcher))
         _commandSession = StateObject(wrappedValue: CommandSession(startImmediately: mode == .runner))
-        _codexTailer = StateObject(wrappedValue: CodexEventTailer(startImmediately: mode == .codex))
+        _activityStore = StateObject(wrappedValue: ActivityStore())
         _btopMonitor = StateObject(wrappedValue: BtopMonitor(startImmediately: mode == .btop))
         _selectedMode = State(initialValue: mode)
     }
@@ -1127,7 +1087,7 @@ struct RedTraceView: View {
             switch newMode {
             case .watcher: tailer.activate()
             case .runner: commandSession.activate()
-            case .codex: codexTailer.activate()
+            case .codex: break
             case .btop: btopMonitor.activate()
             }
         }
@@ -1148,7 +1108,7 @@ struct RedTraceView: View {
                 Picker("Mode", selection: $selectedMode) {
                     Text("WATCH").tag(WindowMode.watcher)
                     Text("RUN").tag(WindowMode.runner)
-                    Text("CODEX").tag(WindowMode.codex)
+                    Text("CHATGPT").tag(WindowMode.codex)
                     Text("BTOP").tag(WindowMode.btop)
                 }
                 .labelsHidden()
@@ -1227,7 +1187,7 @@ struct RedTraceView: View {
                     Label("New Runner Window", systemImage: "terminal")
                 }
                 Button { openWindow(id: "codex") } label: {
-                    Label("New Codex Window", systemImage: "chevron.left.forwardslash.chevron.right")
+                    Label("New ChatGPT Window", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
                 Button { openWindow(id: "btop") } label: {
                     Label("New System Monitor", systemImage: "waveform.path.ecg")
@@ -1237,7 +1197,7 @@ struct RedTraceView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Open a Watcher, Runner, Codex, or System Monitor window")
+            .help("Open a Watcher, Runner, ChatGPT, or System Monitor window")
             Button { showAppearance.toggle() } label: { Image(systemName: "paintpalette") }
                 .help("Appearance")
                 .popover(isPresented: $showAppearance, arrowEdge: .bottom) { appearancePanel }
@@ -1269,7 +1229,7 @@ struct RedTraceView: View {
             } else if !usesCardLayout && selectedMode == .runner {
                 Button { commandSession.clearOutput() } label: { Image(systemName: "trash") }.help("Clear runner output")
             } else if !usesCardLayout && selectedMode == .codex {
-                Button { codexTailer.clear() } label: { Image(systemName: "trash") }.help("Clear Codex event log")
+                Button { activityStore.clear() } label: { Image(systemName: "trash") }.help("Clear ChatGPT event log")
             }
             Button { showControls = false } label: { Image(systemName: "chevron.up") }.help("Hide controls")
         }
@@ -1287,7 +1247,6 @@ struct RedTraceView: View {
     private func activateAllModes() {
         tailer.activate()
         commandSession.activate()
-        codexTailer.activate()
         btopMonitor.activate()
     }
 
@@ -1295,7 +1254,7 @@ struct RedTraceView: View {
         switch selectedMode {
         case .watcher: return "WATCH"
         case .runner: return "RUN"
-        case .codex: return "CODEX"
+        case .codex: return "CHATGPT"
         case .btop: return "BTOP"
         }
     }
@@ -1319,13 +1278,9 @@ struct RedTraceView: View {
 
     private var logView: some View {
         VStack(spacing: 0) {
-            TerminalTextView(
-                text: visibleText,
-                fontName: fontName,
-                fontSize: fontSize,
-                textColor: NSColor(hex: textColorHex),
-                wrapLines: wrapLines
-            )
+            if selectedMode == .runner { InteractiveTerminalView(model: commandSession.terminal, send: commandSession.send) }
+            else if selectedMode == .codex { ActivityView(store: activityStore) }
+            else { TerminalTextView(text: visibleText, fontName: fontName, fontSize: fontSize, textColor: NSColor(hex: textColorHex), wrapLines: wrapLines) }
             if selectedMode == .runner {
                 Divider().opacity(0.45)
                 commandBar
@@ -1337,7 +1292,7 @@ struct RedTraceView: View {
         switch selectedMode {
         case .watcher: return tailer.text
         case .runner: return commandSession.output
-        case .codex: return codexTailer.text
+        case .codex: return ""
         case .btop: return ""
         }
     }
@@ -1396,7 +1351,7 @@ struct RedTraceView: View {
             switch mode {
             case .watcher: tailer.activate()
             case .runner: commandSession.activate()
-            case .codex: codexTailer.activate()
+            case .codex: break
             case .btop: btopMonitor.activate()
             }
         }
@@ -1492,24 +1447,11 @@ struct RedTraceView: View {
             )
         case .runner:
             VStack(spacing: 0) {
-                TerminalTextView(
-                    text: commandSession.output,
-                    fontName: fontName,
-                    fontSize: fontSize,
-                    textColor: NSColor(hex: textColorHex),
-                    wrapLines: wrapLines
-                )
+                InteractiveTerminalView(model: commandSession.terminal, send: commandSession.send)
                 Divider().opacity(0.35)
                 commandBar
             }
-        case .codex:
-            TerminalTextView(
-                text: codexTailer.text,
-                fontName: fontName,
-                fontSize: fontSize,
-                textColor: NSColor(hex: textColorHex),
-                wrapLines: wrapLines
-            )
+        case .codex: ActivityView(store: activityStore)
         case .btop:
             btopView
         }
@@ -1519,7 +1461,7 @@ struct RedTraceView: View {
         switch mode {
         case .watcher: return "WATCH"
         case .runner: return "RUN"
-        case .codex: return "CODEX"
+        case .codex: return "CHATGPT"
         case .btop: return "BTOP"
         }
     }

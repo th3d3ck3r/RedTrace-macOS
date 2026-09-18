@@ -24,6 +24,10 @@ xcrun swiftc \
   -target "$ARCH-apple-macosx13.0" \
   -framework SwiftUI \
   -framework AppKit \
+  "$ROOT/TerminalCore.swift" \
+  "$ROOT/PTYSession.swift" \
+  "$ROOT/TerminalView.swift" \
+  "$ROOT/Activity.swift" \
   "$ROOT/RedTrace.swift" \
   -o "$MACOS_DIR/RedTrace"
 
